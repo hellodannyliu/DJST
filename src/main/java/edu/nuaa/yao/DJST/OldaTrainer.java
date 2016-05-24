@@ -9,13 +9,14 @@ public class OldaTrainer {
 	public OldaArgs option;
 	public Vocabulary globalVoc;	
 	public OldaModel trnModel;
-	public double[][][] B;
-	public double[][] obeta;
+	public double[][][][] B;
+	public double[][][] obeta;
 	public Vocabulary[] vocWindow;
 	public double Kalpha;
 	public double Vbeta;
-	public double[] Vobeta;
+	public double[][] Vobeta;
 	public int docnum;
+	public double gama;
 	public boolean init(OldaArgs option) {
 		this.option = option;
 		trnModel = new OldaModel();
@@ -26,13 +27,14 @@ public class OldaTrainer {
 			System.out.println("init olda trainer failed!");
 			return false;
 		}
-		B = new double[option.delta][][];
-		obeta = new double[trnModel.K][];
+		
+		B = new double[option.delta][][][];
+		obeta = new double[trnModel.K][trnModel.S][];
 		globalVoc = trnModel.data.localVoc;
 		vocWindow = new Vocabulary[option.delta];
 		Kalpha = trnModel.K * trnModel.alpha;
 		Vbeta = trnModel.V * trnModel.beta;
-		Vobeta = new double[trnModel.K];
+		Vobeta = new double[trnModel.K][trnModel.S];
 		docnum=trnModel.docnum;
 		return true;
 	}
@@ -144,7 +146,7 @@ public class OldaTrainer {
 	
 	protected void computeObeta() {
 		for (int i = 0; i < trnModel.K; ++i) {
-			obeta[i] = new double[trnModel.V];
+			obeta[i] = new double[trnModel.V][];
 			double sum = 0;
 			for (int j = 0; j < trnModel.V; j++) {
 				double tmpSum = 0;

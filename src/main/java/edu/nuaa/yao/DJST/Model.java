@@ -51,6 +51,7 @@ public class Model {
 	public int K;	//number of topic
 	public int V;	//vocabulary size
 	public int M;	//number of document
+	public int S;   //情感数量
 	public double alpha;
 	public double beta;
 	public int niters; //number of Gibbs sampling iteration
@@ -59,9 +60,11 @@ public class Model {
 	public int twords; //print out top words per each topic
 	public int withrawdata;
 	public int docnum;
+	public double gama;
+	
 	// Estimated/Inferenced parameters
-	public double[][] theta;
-	public double[][] phi;
+	public double[][][] theta;
+	public double[][][] phi;
 	
 	// Temp variables while sampling
 	
@@ -70,33 +73,57 @@ public class Model {
      * 每个词语的主题 z[i][j] := 文档i的第j个词语的主题编号
      */
     public int z[][];
-
+    /**
+     *每个词s[i][j]:= 文档i的第j个词语的情感编号
+     **/
+    public int s[][];
     /**
      * cwt[i][j] number of instances of word i (term?) assigned to topic j.<br>
-     * 计数器，nw[i][j] := 词语i归入主题j的次数
-     */
-    public int[][] nw;
+     * 计数器，nw[i][j][s] := 词语i归入主题j情感s的次数
+     * M*TK*/
+    public int[][][] nw;
 
     /**
      * na[i][j] number of words in document i assigned to topic j.<br>
-     * 计数器，nd[i][j] := 文档[i]中归入主题j的词语的个数
+     * 计数器，nd[i][j][s] := 文档[i]中归入主题j的词语的个数
+     * n*K*S
      */
-    public int[][] nd;
+    public int[][][] nd;
 
     /**
      * nwsum[j] total number of words assigned to topic j.<br>
-     * 计数器，nwsum[j] := 归入主题j词语的个数
+     * 计数器，nwsum[j][s] := 归入主题j情感s词语的个数
+     * M*S
      */
-    public int[] nwsum;
+    public int[][] nwsum;
 
     /**
      * nasum[i] total number of words in document i.<br>
      * 计数器,ndsum[i] := 文档i中全部词语的数量
+     * K*S
      */
-    public int[] ndsum;
+    public int[][] ndsum;
+    /**
+     * 
+     * 文档i的单词数目
+     * M
+     */
+    int [] nsum;
+    /**
+     * cumulative statistics of theta<br>
+     * theta的累积量
+     */
     
+    
+    double[][] thetasum;
+
+    /**
+     * cumulative statistics of phi<br>
+     * phi的累积量
+     */
+    double[][] phisum;
     // temp variables for sampling
-    public double [] p; 
+    public double [][] p; 
  	
     public Model() {
     	this.wordMapFile = "wordmap.txt";
@@ -115,8 +142,9 @@ public class Model {
 		M = 0;
 		V = 0;
 		K = 100;
+		S=2;
 		alpha = 50.0 / K;
-		beta = 0.1;
+		beta = 0.01;
 		niters = 2000;
 		liter = 0;
 		
