@@ -22,108 +22,82 @@ import java.util.Map.Entry;
 import java.util.StringTokenizer;
 
 
-
+/**
+ * Base model class for the Dynamic Joint Sentiment-Topic (dJST) model.
+ *
+ * Array dimensions follow the dJST paper notation:
+ *   L = number of sentiment labels (field: S)
+ *   T = number of topics (field: K)
+ *   V = vocabulary size
+ *   M = number of documents
+ *
+ * Field index conventions:
+ *   nw[V][K][S]         - word × topic × sentiment count
+ *   nd[M][K][S]         - doc × topic × sentiment count
+ *   nwsum[K][S]         - topic × sentiment total count
+ *   ndsum[M][S]         - doc × sentiment total count
+ *   nsum[M]             - doc total word count
+ *   z[M][N_d]           - topic assignment per word
+ *   s[M][N_d]           - sentiment assignment per word
+ *   theta[M][S][K]      - doc × sentiment × topic distribution
+ *   phi[S][K][V]        - sentiment × topic × word distribution
+ *   p[K][S]             - sampling probability matrix
+ */
 public class Model {
 	
 	//---------------------------------------------------------------
 	//	Class Variables
 	//---------------------------------------------------------------
 	
-	public static String tassignSuffix;	//suffix for topic assignment file
-	public static String thetaSuffix;		//suffix for theta (topic - document distribution) file
-	public static String phiSuffix;		//suffix for phi file (topic - word distribution) file
-	public static String othersSuffix; 	//suffix for containing other parameters
-	public static String twordsSuffix;		//suffix for file containing words-per-topics
+	public static String tassignSuffix;
+	public static String thetaSuffix;
+	public static String phiSuffix;
+	public static String othersSuffix;
+	public static String twordsSuffix;
 	
 	//---------------------------------------------------------------
 	//	Model Parameters and Variables
 	//---------------------------------------------------------------
 	
-	public String wordMapFile; 		//file that contain word to id map
-	public String trainlogFile; 	//training log file	
-	
+	public String wordMapFile;
+	public String trainlogFile;
+
 	public String dir;
 	public String dfile;
 	public String modelName;
-	public int modelStatus; 		//see Constants class for status of model
-	public Corpus data;			// link to a dataset
+	public int modelStatus;
+	public Corpus data;
 	
-	public int K;	//number of topic
-	public int V;	//vocabulary size
-	public int M;	//number of document
-	public int S;   //情感数量
+	public int K;
+	public int V;
+	public int M;
+	public int S;
 	public double alpha;
 	public double beta;
-	public int niters; //number of Gibbs sampling iteration
-	public int liter; //the iteration at which the model was saved	
-	public int savestep; //saving period
-	public int twords; //print out top words per each topic
+	public int niters;
+	public int liter;
+	public int savestep;
+	public int twords;
 	public int withrawdata;
 	public int docnum;
 	public double gama;
 	
-	// Estimated/Inferenced parameters
-	public double[][][] theta;
-	public double[][][] phi;
+	public double[][][] theta; // M × S × K
+	public double[][][] phi;   // S × K × V
 	
-	// Temp variables while sampling
-	
-	/**
-     * topic assignments for each word.<br>
-     * 每个词语的主题 z[i][j] := 文档i的第j个词语的主题编号
-     */
-    public int z[][];
-    /**
-     *每个词s[i][j]:= 文档i的第j个词语的情感编号
-     **/
-    public int s[][];
-    /**
-     * cwt[i][j] number of instances of word i (term?) assigned to topic j.<br>
-     * 计数器，nw[i][j][s] := 词语i归入主题j情感s的次数
-     * M*TK*/
-    public int[][][] nw;
+	public int z[][];   // topic assignments: M × N_d
+	public int s[][];   // sentiment assignments: M × N_d
 
-    /**
-     * na[i][j] number of words in document i assigned to topic j.<br>
-     * 计数器，nd[i][j][s] := 文档[i]中归入主题j的词语的个数
-     * n*K*S
-     */
-    public int[][][] nd;
+	public int[][][] nw;    // V × K × S
+	public int[][][] nd;    // M × K × S
+	public int[][] nwsum;   // K × S
+	public int[][] ndsum;   // M × S
+	int[] nsum;             // M
 
-    /**
-     * nwsum[j] total number of words assigned to topic j.<br>
-     * 计数器，nwsum[j][s] := 归入主题j情感s词语的个数
-     * M*S
-     */
-    public int[][] nwsum;
+	double[][] thetasum;
+	double[][] phisum;
 
-    /**
-     * nasum[i] total number of words in document i.<br>
-     * 计数器,ndsum[i] := 文档i中全部词语的数量
-     * K*S
-     */
-    public int[][] ndsum;
-    /**
-     * 
-     * 文档i的单词数目
-     * M
-     */
-    int [] nsum;
-    /**
-     * cumulative statistics of theta<br>
-     * theta的累积量
-     */
-    
-    
-    double[][] thetasum;
-
-    /**
-     * cumulative statistics of phi<br>
-     * phi的累积量
-     */
-    double[][] phisum;
-    // temp variables for sampling
-    public double [][] p; 
+	public double[][] p; // K × S
  	
     public Model() {
     	this.wordMapFile = "wordmap.txt";
@@ -142,17 +116,19 @@ public class Model {
 		M = 0;
 		V = 0;
 		K = 100;
-		S=2;
+		S = 2;
 		alpha = 50.0 / K;
 		beta = 0.01;
 		niters = 2000;
 		liter = 0;
 		
 		z = null;
+		s = null;
 		nw = null;
 		nd = null;
 		nwsum = null;
 		ndsum = null;
+		nsum = null;
 		theta = null;
 		phi = null;
     }
@@ -160,12 +136,8 @@ public class Model {
 	//---------------------------------------------------------------
 	//	I/O Methods
 	//---------------------------------------------------------------
-	/**
-	 * read other file to get parameters
-	 */
+
 	protected boolean readOthersFile(String otherFile){
-		//open file <model>.others to read:
-		
 		try {
 			BufferedReader reader = new BufferedReader(new FileReader(otherFile));
 			String line;
@@ -188,6 +160,9 @@ public class Model {
 				else if (optstr.equalsIgnoreCase("ntopics")){
 					K = Integer.parseInt(optval);
 				}
+				else if (optstr.equalsIgnoreCase("nsentiments")){
+					S = Integer.parseInt(optval);
+				}
 				else if (optstr.equalsIgnoreCase("liter")){
 					liter = Integer.parseInt(optval);
 				}
@@ -197,11 +172,7 @@ public class Model {
 				else if (optstr.equalsIgnoreCase("ndocs")){
 					M = Integer.parseInt(optval);
 				}
-				else {
-					// any more?
-				}
 			}
-			
 			reader.close();
 		}
 		catch (Exception e){
@@ -213,7 +184,6 @@ public class Model {
 	}
 	
 	protected boolean readTAssignFile(String tassignFile){
-		
 		BufferedReader reader = null;
 		try {
 			int i,j;
@@ -221,9 +191,10 @@ public class Model {
 					new FileInputStream(tassignFile), "UTF-8"));
 			
 			String line;
-			z = new int[M][];			
+			z = new int[M][];
+			s = new int[M][];
 			data = new Corpus(M);
-			data.V = V;			
+			data.V = V;
 			for (i = 0; i < M; i++){
 				line = reader.readLine();
 				StringTokenizer tknr = new StringTokenizer(line, " \t\r\n");
@@ -232,33 +203,32 @@ public class Model {
 				
 				int[] words = new int[length];
 				int[] topics = new int[length];
+				int[] sentiments = new int[length];
 				
 				for (j = 0; j < length; j++){
 					String token = tknr.nextToken();
-					
 					StringTokenizer tknr2 = new StringTokenizer(token, ":");
-					if (tknr2.countTokens() != 2){
+					int tokenCount = tknr2.countTokens();
+					if (tokenCount < 2){
 						System.out.println("Invalid word-topic assignment line\n");
 						return false;
 					}
 					
 					words[j] = Integer.parseInt(tknr2.nextToken());
 					topics[j] = Integer.parseInt(tknr2.nextToken());
-				}//end for each topic assignment
+					sentiments[j] = (tokenCount >= 3) ? Integer.parseInt(tknr2.nextToken()) : 0;
+				}
 				
-				//allocate and add new document to the corpus
 				Document doc = new Document(length, words);
 				data.setDoc(doc, i);
 				
-				//assign values for z
 				z[i] = new int[length];
+				s[i] = new int[length];
 				for (j = 0; j < length; j++){
 					z[i][j] = topics[j];
+					s[i][j] = sentiments[j];
 				}
-				
-			}//end for each doc
-			
-			
+			}
 		}
 		catch (Exception e){
 			System.out.println("Error while loading model: " + e.getMessage());
@@ -266,7 +236,7 @@ public class Model {
 			return false;
 		} finally {
 			try {
-				reader.close();
+				if (reader != null) reader.close();
 			} catch (IOException e) {
 				e.printStackTrace();
 			}
@@ -274,33 +244,22 @@ public class Model {
 		return true;
 	}
 	
-	/**
-	 * 2015-06-04 read model-final.theta
-	 * @param thetaFile
-	 * @return
-	 */
 	protected boolean readThetaFile(String thetaFile){
-		
 		BufferedReader reader = null;
 		try {
-			int i,j;
 			reader = new BufferedReader(new InputStreamReader(
 					new FileInputStream(thetaFile), "UTF-8"));
 			
-			String line;
-			theta = new double[M][K];
-			for (i = 0; i < M; i++){
-				line = reader.readLine();
-				StringTokenizer tknr = new StringTokenizer(line, " \t\r\n");
-
-				double[] ts = new double[K];
-				for (j = 0; j < K; j++){
-					String token = tknr.nextToken();
-					ts[j] = Double.parseDouble(token);
-				}//end for each topic assignment
-				theta[i] = ts;
-			}//end for each doc
-			
+			theta = new double[M][S][K];
+			for (int i = 0; i < M; i++){
+				String line = reader.readLine();
+				StringTokenizer tknr = new StringTokenizer(line, " \t\r\n|");
+				for (int l = 0; l < S; l++) {
+					for (int j = 0; j < K; j++){
+						theta[i][l][j] = Double.parseDouble(tknr.nextToken());
+					}
+				}
+			}
 		}
 		catch (Exception e){
 			System.out.println("Error while loading model: " + e.getMessage());
@@ -308,7 +267,7 @@ public class Model {
 			return false;
 		} finally {
 			try {
-				reader.close();
+				if (reader != null) reader.close();
 			} catch (IOException e) {
 				e.printStackTrace();
 			}
@@ -316,34 +275,22 @@ public class Model {
 		return true;
 	}
 	
-	
-	/**
-	 * 2015-06-04 read model-final.phi
-	 * @param phiFile
-	 * @return
-	 */
 	protected boolean readPhiFile(String phiFile){
-		
 		BufferedReader reader = null;
 		try {
-			int i,j;
 			reader = new BufferedReader(new InputStreamReader(
 					new FileInputStream(phiFile), "UTF-8"));
 			
-			String line;
-			phi = new double[K][V];
-			for (i = 0; i < K; i++){
-				line = reader.readLine();
-				StringTokenizer tknr = new StringTokenizer(line, " \t\r\n");
-
-				double[] ts = new double[V];
-				for (j = 0; j < V; j++){
-					String token = tknr.nextToken();
-					ts[j] = Double.parseDouble(token);
-				}//end for each topic assignment
-				phi[i] = ts;
-			}//end for each doc
-			
+			phi = new double[S][K][V];
+			for (int l = 0; l < S; l++) {
+				for (int k = 0; k < K; k++){
+					String line = reader.readLine();
+					StringTokenizer tknr = new StringTokenizer(line, " \t\r\n");
+					for (int j = 0; j < V; j++){
+						phi[l][k][j] = Double.parseDouble(tknr.nextToken());
+					}
+				}
+			}
 		}
 		catch (Exception e){
 			System.out.println("Error while loading model: " + e.getMessage());
@@ -351,7 +298,7 @@ public class Model {
 			return false;
 		} finally {
 			try {
-				reader.close();
+				if (reader != null) reader.close();
 			} catch (IOException e) {
 				e.printStackTrace();
 			}
@@ -359,345 +306,188 @@ public class Model {
 		return true;
 	}
 	
-	/**
-	 * load saved model
-	 */
 	public boolean loadModel(){
-		
 		if (!readOthersFile(dir + File.separator + modelName + othersSuffix)) {
 			return false;
 		}
-		
 		if (!readTAssignFile(dir + File.separator + modelName + tassignSuffix)) {
 			return false;
 		}
-		
-		// read dictionary
 		Vocabulary voc = new Vocabulary();
 		if (!voc.readWordMap(dir + File.separator + wordMapFile)) {
 			return false;
 		}
 		data.localVoc = voc;
-		
 		return true;
 	}
     
-    /**
-	 * Save word-topic assignments for this model
-	 */
 	protected boolean saveModelTAssign(String filename){
-		
 		BufferedWriter bw = null;
 		try {
 			bw = new BufferedWriter(new OutputStreamWriter(
 					new FileOutputStream(filename), "UTF-8"));
 			for (int m = 0; m < M; m++) {
 				for (int n = 0, N = data.docs.get(m).length; n < N; n++) {
-					bw.write(data.docs.get(m).words[n] + ":" + z[m][n] + " ");
+					bw.write(data.docs.get(m).words[n] + ":" + z[m][n] + ":" + s[m][n] + " ");
 				}
 				bw.write("\n");
 			}
 			return true;
-		} catch (UnsupportedEncodingException e) {
-			e.printStackTrace();
-		} catch (FileNotFoundException e) {
-			e.printStackTrace();
-		} catch (IOException e) {
+		} catch (Exception e) {
 			e.printStackTrace();
 		} finally {
-			try {
-				bw.close();
-			} catch (IOException e) {
-				e.printStackTrace();
-			}
+			try { if (bw != null) bw.close(); } catch (IOException e) { e.printStackTrace(); }
 		}
 		return false;
 	}
     
-	/**
-	 * Save theta (topic distribution) for this model
-	 */
 	protected boolean saveModelTheta(String filename){
-		
 		BufferedWriter writer = null;
 		try{
 			writer = new BufferedWriter(new FileWriter(filename));
 			for (int i = 0; i < M; i++){
-				for (int j = 0; j < K; j++){
-					writer.write(theta[i][j] + " ");
+				for (int l = 0; l < S; l++) {
+					for (int j = 0; j < K; j++){
+						writer.write(theta[i][l][j] + " ");
+					}
+					if (l < S - 1) writer.write("| ");
 				}
 				writer.write("\n");
 			}
 			return true;
-		} catch (UnsupportedEncodingException e) {
-			e.printStackTrace();
-		} catch (FileNotFoundException e) {
-			e.printStackTrace();
-		} catch (IOException e) {
+		} catch (Exception e) {
 			e.printStackTrace();
 		} finally {
-			try {
-				writer.close();
-			} catch (IOException e) {
-				e.printStackTrace();
-			}
+			try { if (writer != null) writer.close(); } catch (IOException e) { e.printStackTrace(); }
 		}
 		return false;
 	}
 	
-	/**
-	 * Save word-topic distribution
-	 */
-	
 	protected boolean saveModelPhi(String filename){
-		
 		BufferedWriter writer = null;
 		try {
 			writer = new BufferedWriter(new FileWriter(filename));
-			
-			for (int i = 0; i < K; i++){
-				for (int j = 0; j < V; j++){
-					writer.write(phi[i][j] + " ");
+			for (int l = 0; l < S; l++) {
+				for (int k = 0; k < K; k++){
+					for (int j = 0; j < V; j++){
+						writer.write(phi[l][k][j] + " ");
+					}
+					writer.write("\n");
 				}
-				writer.write("\n");
 			}
 			return true;
-		} catch (UnsupportedEncodingException e) {
-			e.printStackTrace();
-		} catch (FileNotFoundException e) {
-			e.printStackTrace();
-		} catch (IOException e) {
+		} catch (Exception e) {
 			e.printStackTrace();
 		} finally {
-			try {
-				writer.close();
-			} catch (IOException e) {
-				e.printStackTrace();
-			}
+			try { if (writer != null) writer.close(); } catch (IOException e) { e.printStackTrace(); }
 		}
 		return false;
 	}
 	
-	/**
-	 * Save other information of this model
-	 */
 	protected boolean saveModelOthers(String filename){
-		
 		BufferedWriter writer = null;
 		try{
 			writer = new BufferedWriter(new FileWriter(filename));
-			
 			writer.write("alpha=" + alpha + "\n");
 			writer.write("beta=" + beta + "\n");
 			writer.write("ntopics=" + K + "\n");
+			writer.write("nsentiments=" + S + "\n");
 			writer.write("ndocs=" + M + "\n");
 			writer.write("nwords=" + V + "\n");
 			writer.write("liters=" + liter + "\n");
 			writer.write("dfile=" + dfile);
 			return true;
-		} catch (UnsupportedEncodingException e) {
-			e.printStackTrace();
-		} catch (FileNotFoundException e) {
-			e.printStackTrace();
-		} catch (IOException e) {
+		} catch (Exception e) {
 			e.printStackTrace();
 		} finally {
-			try {
-				writer.close();
-			} catch (IOException e) {
-				e.printStackTrace();
-			}
+			try { if (writer != null) writer.close(); } catch (IOException e) { e.printStackTrace(); }
 		}
 		return false;
 	}
 	
-	/**
-	 * Save theta (topic distribution) for this model
-	 */
 	protected boolean saveModelTwords(String filename){
-		
 		BufferedWriter bw = null;
 		try {
 			bw = new BufferedWriter(new OutputStreamWriter(
 					new FileOutputStream(filename), "UTF-8"));
 			
-			if (twords > V || 0 == twords){
-				twords = V;
+			int tw = twords;
+			if (tw > V || tw == 0){
+				tw = V;
 			}
 			
-			for (int k = 0; k < K; k++){
-				Map<Integer, Double> wordsProbsMap = new HashMap<Integer, Double>(V);
-				for (int w = 0; w < V; w++) {
-					wordsProbsMap.put(w, phi[k][w]);
-				}
-				List<Entry<Integer, Double>> wordsProbsList = 
-						new ArrayList<Entry<Integer, Double>>(wordsProbsMap.entrySet());
-				Collections.sort(wordsProbsList, new Comparator<Entry<Integer, Double>>() {
+			String[] sentimentLabels = new String[S];
+			for (int l = 0; l < S; l++) {
+				sentimentLabels[l] = "Sentiment " + l;
+			}
 
-					public int compare(Entry<Integer, Double> o1, Entry<Integer, Double> o2) {
-						return -o1.getValue().compareTo(o2.getValue());
+			for (int l = 0; l < S; l++) {
+				for (int k = 0; k < K; k++){
+					List<Integer> tWordsIndexArray = new ArrayList<Integer>();
+					for(int j = 0; j < V; j++){
+						tWordsIndexArray.add(j);
 					}
-					
-				});			
-				bw.write("Topic " + k + "th:\n");
-				for (int i = 0; i < twords; i++) {
-					String word = data.localVoc.getWord(wordsProbsList.get(i).getKey());
-					bw.write("\t" + word + " " + wordsProbsList.get(i).getValue() + "\n");
+					final int fl = l, fk = k;
+					Collections.sort(tWordsIndexArray, new Comparator<Integer>() {
+						public int compare(Integer o1, Integer o2) {
+							if (phi[fl][fk][o1] > phi[fl][fk][o2]) return -1;
+							else if (phi[fl][fk][o1] < phi[fl][fk][o2]) return 1;
+							return 0;
+						}
+					});
+					bw.write(sentimentLabels[l] + " topic " + k + "\t:\n");
+					for(int t = 0; t < tw; t++){
+						bw.write(data.localVoc.id2word.get(tWordsIndexArray.get(t)) + " " 
+							+ phi[l][k][tWordsIndexArray.get(t)] + "\n");
+					}
+					bw.write("\n");
 				}
 			}
+			bw.close();
 			return true;
-		} catch (UnsupportedEncodingException e) {
+		} catch (Exception e) {
 			e.printStackTrace();
-		} catch (FileNotFoundException e) {
-			e.printStackTrace();
-		} catch (IOException e) {
-			e.printStackTrace();
-		} finally {
-			try {
-				bw.close();
-			} catch (IOException e) {
-				e.printStackTrace();
-			}
 		}
 		return false;
 	}
-	
+
 	protected boolean saveModelTwordsWithDomain(String filename) throws IOException{
-		
-		BufferedWriter bw = null;
-		
-			bw = new BufferedWriter(new OutputStreamWriter(
-					new FileOutputStream(filename), "UTF-8"));
-			
-			if (twords > V || 0 == twords){
-				twords = V;
-			}
-			
-			//boolean[] domainExists = new boolean[Tool.DOMAINS.size()];
-
-			for (int k = 0; k < K; k++){
-				Map<Integer, Double> wordsProbsMap = new HashMap<Integer, Double>(V);
-				for (int w = 0; w < V; w++) {
-					wordsProbsMap.put(w, phi[k][w]);
-				}
-				List<Integer> tWordsIndexArray = new ArrayList<Integer>(); 
-				for(int j = 0; j < V; j++){
-					tWordsIndexArray.add(new Integer(j));
-				}
-				Collections.sort(tWordsIndexArray, new Model.TwordsComparable(phi[k]));
-				bw.write("topic " + k + "\t:\n");
-				for(int t = 0; t < twords; t++){
-					bw.write(data.localVoc.id2word.get(tWordsIndexArray.get(t)) + " " + phi[k][tWordsIndexArray.get(t)] + "\n");
-				}
-				bw.write("\n");
-			}
-			bw.close();
-				/*list<Entry<Integer, Double>> wordsProbsList = 
-						new ArrayList<Entry<Integer, Double>>(wordsProbsMap.entrySet());
-				Collections.sort(wordsProbsList, new Comparator<Entry<Integer, Double>>() {
-
-					public int compare(Entry<Integer, Double> o1, Entry<Integer, Double> o2) {
-						return -o1.getValue().compareTo(o2.getValue());
-					}
-					
-				});
-				
-				List<Pair<Integer, Double>> docsProbsList = new ArrayList<Pair<Integer, Double>>();
-				//double[] docsProbs = new double[Tool.DOMAINS.size()];
-				//for (int i = 0; i < M; i++) {
-				//	docsProbs[Tool.DOMAINS.indexOf(data.docs.get(i).domain)] += theta[i][k];
-				//}
-				for (int i = 0; i < docsProbs.length; i++) {
-					Pair<Integer, Double> pair = new Pair<Integer, Double>(i, docsProbs[i]);
-					docsProbsList.add(pair);
-				}
-				Collections.sort(docsProbsList);
-				
-				int d1 = docsProbsList.get(0).first;
-				int d2 = docsProbsList.get(1).first;
-				domainExists[d1] = true;
-				domainExists[d2] = true;
-				bw.write("Topic " + k + "th:" + Tool.DOMAINS.get(d1) 
-						+ " " + Tool.DOMAINS.get(d2) + "\n");
-				for (int i = 0; i < twords; i++) {
-					String word = data.localVoc.getWord(wordsProbsList.get(i).getKey());
-					bw.write("\t" + word + " " + wordsProbsList.get(i).getValue() + "\n");
-				}
-			}
-			int count = 0;
-			bw.write("Topic:-------------------------------------------------------------\n");
-			bw.write("Topic:domain don't exists:");
-			for (int i = 0; i < domainExists.length; i++) {
-				if (domainExists[i]) {
-					count++;
-				} else {
-					bw.write(Tool.DOMAINS.get(i) + "\t");
-				}
-			}
-			bw.write("\n");
-			bw.write("Topic:domain exists num:" + count + "/" + domainExists.length + "\n");
-			bw.write("Topic:doamin exists percentage:" + (double)count / domainExists.length);
-			return true;
-		} catch (UnsupportedEncodingException e) {
-			e.printStackTrace();
-		} catch (FileNotFoundException e) {
-			e.printStackTrace();
-		} catch (IOException e) {
-			e.printStackTrace();
-		*/
-			
-		
-		return false;
+		return saveModelTwords(filename);
 	}
 	
-	/**
-	 * Save model
-	 */
 	public boolean saveModelWithDomain(String modelName){
 		if (!saveModelTAssign(dir + File.separator + modelName + tassignSuffix)) {
 			return false;
 		}
-		
 		if (!saveModelOthers(dir + File.separator + modelName + othersSuffix)) {			
 			return false;
 		}
-		
 		if (!saveModelTheta(dir + File.separator + modelName + thetaSuffix)) {
 			return false;
 		}
-		
 		if (!saveModelPhi(dir + File.separator + modelName + phiSuffix)) {
 			return false;
 		}
-		
 		if (twords > 0) {
-			if (!saveModelWithDomain(dir + File.separator + modelName + twordsSuffix))
+			if (!saveModelTwords(dir + File.separator + modelName + twordsSuffix))
 				return false;
 		}
 		return true;
 	}
 	
-    /**
-	 * Save model
-     * @throws IOException 
-	 */
 	public boolean saveModel(String modelName) throws IOException{
 		if (!saveModelTAssign(dir + File.separator + modelName + tassignSuffix)) {
 			return false;
 		}
-		
 		if (!saveModelOthers(dir + File.separator + modelName + othersSuffix)) {			
 			return false;
 		}
-		
 		if (!saveModelTheta(dir + File.separator + modelName + thetaSuffix)) {
 			return false;
 		}
-		
 		if (!saveModelPhi(dir + File.separator + modelName + phiSuffix)) {
 			return false;
 		}
-		
 		if (twords > 0) {
 			if (!saveModelTwordsWithDomain(dir + File.separator + modelName + twordsSuffix))
 				return false;
@@ -708,11 +498,7 @@ public class Model {
 	//---------------------------------------------------------------
 	//	Init Methods
 	//---------------------------------------------------------------
-    /**
-     * initialize model parameters
-     * @param option
-     * @return 
-     */
+
     protected boolean init(LdaArgs option) {
     	if (option == null) {
     		return false;
@@ -720,6 +506,7 @@ public class Model {
     	
     	modelName = option.modelName;
 		K = option.ntopics;
+		S = option.S;
 		
 		alpha = option.alpha;
 		if (alpha < 0.0) {
@@ -743,16 +530,12 @@ public class Model {
 		return true;    	
     }
     
-    /**
-	 * Init parameters for estimation
-	 */
     public boolean initNewModel(LdaArgs option) {
-    	
     	if (!init(option)) {
     		return false;
     	}
     	
-    	p = new double[K];
+    	p = new double[K][S];
     	
     	data = Corpus.loadCorpus(dir + File.separator + dfile);
     	if (data == null) {
@@ -764,104 +547,90 @@ public class Model {
     	V = data.V;
     	savestep = option.savestep;
     	
-    	nw = new int[V][K];
-    	nd = new int[M][K];
-    	nwsum = new int[K];
-    	ndsum = new int[M];
+    	nw = new int[V][K][S];
+    	nd = new int[M][K][S];
+    	nwsum = new int[K][S];
+    	ndsum = new int[M][S];
+    	nsum = new int[M];
     	z = new int[M][];
+    	s = new int[M][];
     	
     	for (int m = 0; m < M; m++) {
 			int N = data.docs.get(m).length;
 			z[m] = new int[N];
-			
-			//initialize z
+			s[m] = new int[N];
 			for(int n = 0; n < N; n++) {
 				int topic = (int)(Math.random() * K);
+				int sentiment = (int)(Math.random() * S);
 				z[m][n] = topic;
-				nw[data.docs.get(m).words[n]][topic]++;
-				nd[m][topic]++;
-				nwsum[topic]++;
+				s[m][n] = sentiment;
+				nw[data.docs.get(m).words[n]][topic][sentiment]++;
+				nd[m][topic][sentiment]++;
+				nwsum[topic][sentiment]++;
+				ndsum[m][sentiment]++;
 			}
-			ndsum[m] = N;
+			nsum[m] = N;
 		}
     	
-    	theta = new double[M][K];
-    	phi = new double[K][V];
+    	theta = new double[M][S][K];
+    	phi = new double[S][K][V];
     	
     	return true;
     }
     
-    /**
-	 * Init parameters for inference
-	 * @param newData DataSet for which we do inference
-	 */
-	public boolean initNewModel(LdaArgs option, Corpus newdata, Model trnModel){
+    public boolean initNewModel(LdaArgs option, Corpus newdata, Model trnModel){
 		if (!init(option))
 			return false;
 		
-		int m, n, w, k;
-		
 		K = trnModel.K;
+		S = trnModel.S;
 		alpha = trnModel.alpha;
 		beta = trnModel.beta;		
 		
-		p = new double[K];
+		p = new double[K][S];
 		System.out.println("K:" + K);
 		
 		data = newdata;
 		
-		//+ allocate memory and assign values for variables		
 		M = data.M;
 		V = data.V;
 		dir = option.dir;
 		savestep = option.savestep;
 		System.out.println("M:" + M);
 		System.out.println("V:" + V);
-		
-		// K: from command line or default value
-	    // alpha, beta: from command line or default values
-	    // niters, savestep: from command line or default values
 
-		nw = new int[V][K];
-		
-		nd = new int[M][K];
-				
-		nwsum = new int[K];
-				
-		ndsum = new int[M];
-				
+		nw = new int[V][K][S];
+		nd = new int[M][K][S];
+		nwsum = new int[K][S];
+		ndsum = new int[M][S];
+		nsum = new int[M];
 		z = new int[M][];
-		for (m = 0; m < data.M; m++){
+		s = new int[M][];
+
+		for (int m = 0; m < data.M; m++){
 			int N = data.docs.get(m).length;
 			z[m] = new int[N];
-			
-			//initilize for z
-			for (n = 0; n < N; n++){
+			s[m] = new int[N];
+			for (int n = 0; n < N; n++){
 				int topic = (int)Math.floor(Math.random() * K);
+				int sentiment = (int)Math.floor(Math.random() * S);
 				z[m][n] = topic;
-				
-				// number of instances of word assigned to topic j
-				nw[data.docs.get(m).words[n]][topic] += 1;
-				// number of words in document i assigned to topic j
-				nd[m][topic] += 1;
-				// total number of words assigned to topic j
-				nwsum[topic] += 1;
+				s[m][n] = sentiment;
+				nw[data.docs.get(m).words[n]][topic][sentiment]++;
+				nd[m][topic][sentiment]++;
+				nwsum[topic][sentiment]++;
+				ndsum[m][sentiment]++;
 			}
-			// total number of words in document i
-			ndsum[m] = N;
+			nsum[m] = N;
 		}
 		
-		theta = new double[M][K];		
-		phi = new double[K][V];
+		theta = new double[M][S][K];
+		phi = new double[S][K][V];
 		
 		return true;
 	}
     
-    /**
-	 * Init parameters for inference
-	 * reading new dataset from file
-	 */
-	public boolean initNewModel(LdaArgs option, Model trnModel){
+    public boolean initNewModel(LdaArgs option, Model trnModel){
 		if (!init(option))
 			return false;
 		
@@ -871,17 +640,15 @@ public class Model {
 			return false;
 		}
 		
-		return initNewModel(option, corpus , trnModel);
+		return initNewModel(option, corpus, trnModel);
 	}
     
 	public boolean initEstimatedModel(String dir) {
-		
 		if (!readOthersFile(dir + File.separator + modelName + othersSuffix)) {
 			return false;
 		}
 		data = new Corpus(M);
 
-		// read dictionary
 		Vocabulary voc = new Vocabulary();
 		if (!voc.readWordMap(dir + File.separator + wordMapFile)) {
 			return false;
@@ -906,20 +673,13 @@ public class Model {
 		return true;
 	}
 	
-    /**
-	 * init parameter for continue estimating or for later inference
-	 */
-	public boolean initEstimatedModel(LdaArgs option){
-		
+    public boolean initEstimatedModel(LdaArgs option){
 		if (!init(option)) {
 			return false;
 		}
 		
-		int m, n, w;
+		p = new double[K][S];
 		
-		p = new double[K];
-		
-		// load model, i.e., read z and trndata
 		if (!loadModel()){
 			System.out.println("Fail to load word-topic assignment file of the model!\n");
 			return false;
@@ -931,38 +691,36 @@ public class Model {
 		System.out.println("\tM:" + M);
 		System.out.println("\tV:" + V);		
 		
-		//初始化默认值为0
-		nw = new int[V][K];		
-		nd = new int[M][K];
-		nwsum = new int[K];    
-	    ndsum = new int[M];
+		nw = new int[V][K][S];		
+		nd = new int[M][K][S];
+		nwsum = new int[K][S];
+	    ndsum = new int[M][S];
+	    nsum = new int[M];
 	    
-	    for (m = 0; m < data.M; m++){
+	    for (int m = 0; m < data.M; m++){
 	    	int N = data.docs.get(m).length;
 	    	
-	    	// assign values for nw, nd, nwsum, and ndsum
-	    	for (n = 0; n < N; n++){
-	    		w = data.docs.get(m).words[n];
+	    	for (int n = 0; n < N; n++){
+	    		int w = data.docs.get(m).words[n];
 	    		int topic = z[m][n];
+	    		int sentiment = (s != null && s[m] != null) ? s[m][n] : 0;
 	    		
-	    		// number of instances of word i assigned to topic j
-	    		nw[w][topic] += 1;
-	    		// number of words in document i assigned to topic j
-	    		nd[m][topic] += 1;
-	    		// total number of words assigned to topic j
-	    		nwsum[topic] += 1;	    		
+	    		nw[w][topic][sentiment]++;
+	    		nd[m][topic][sentiment]++;
+	    		nwsum[topic][sentiment]++;
+	    		ndsum[m][sentiment]++;
 	    	}
-	    	// total number of words in document i
-	    	ndsum[m] = N;
+	    	nsum[m] = N;
 	    }
 	    
-	    theta = new double[M][K];
-	    phi = new double[K][V];
+	    theta = new double[M][S][K];
+	    phi = new double[S][K][V];
 	    dir = option.dir;
 		savestep = option.savestep;
 	    
 		return true;
 	}
+
 	public static void main(String[] args) {
 		Model model1 = new Model();
 		model1.initEstimatedModel("./models/0603/1");
@@ -971,17 +729,15 @@ public class Model {
 		model2.initEstimatedModel("./models/0603/2");
 		System.out.println(model1.data.localVoc.word2id.get("yeahkw"));
 	}
-public class TwordsComparable implements Comparator<Integer> {
+
+	public class TwordsComparable implements Comparator<Integer> {
+		public double[] sortProb;
 		
-		public double [] sortProb; // Store probability of each word in topic k
-		
-		public TwordsComparable (double[] sortProb){
+		public TwordsComparable(double[] sortProb){
 			this.sortProb = sortProb;
 		}
 
 		public int compare(Integer o1, Integer o2) {
-			// TODO Auto-generated method stub
-			//Sort topic word index according to the probability of each word in topic k
 			if(sortProb[o1] > sortProb[o2]) return -1;
 			else if(sortProb[o1] < sortProb[o2]) return 1;
 			else return 0;

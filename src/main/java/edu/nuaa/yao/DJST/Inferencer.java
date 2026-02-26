@@ -34,9 +34,11 @@ import java.util.Collections;
 import java.util.List;
 
 
-
+/**
+ * Inferencer for the dJST model.
+ * Updated to work with 3D arrays for joint sentiment-topic inference.
+ */
 public class Inferencer {	
-	// Train model
 	public Model trnModel;
 	public Vocabulary globalVoc;
 	private LdaArgs option;
@@ -49,11 +51,7 @@ public class Inferencer {
 		trnModel = new Model();
 	}
 	
-	//-----------------------------------------------------
-	// Init method
-	//-----------------------------------------------------
 	public boolean init() {
-		
 		if (!trnModel.initEstimatedModel(option)) {
 			return false;		
 		}
@@ -65,11 +63,6 @@ public class Inferencer {
 		return true;
 	}
 	
-	/**
-	 * inference new model ~ getting data from a specified dataset
-	 * @param newData
-	 * @return
-	 */
 	public Model inference(Corpus newData) {
 		System.out.println("init new model");
 		Model newModel = new Model();		
@@ -79,19 +72,14 @@ public class Inferencer {
 		
 		System.out.println("Sampling " + niters + " iteration for inference!");		
 		for (newModel.liter = 1; newModel.liter <= niters; newModel.liter++){
-			//System.out.println("Iteration " + newModel.liter + " ...");
-			
-			// for all newz_i
 			for (int m = 0; m < newModel.M; ++m){
 				for (int n = 0, l = newModel.data.docs.get(m).length; n < l; n++){
-					// (newz_i = newz[m][n]
-					// sample from p(z_i|z_-1,w)
-					int topic = infSample(m, n);
-					newModel.z[m][n] = topic;
+					int[] result = infSample(m, n);
+					newModel.z[m][n] = result[0];
+					newModel.s[m][n] = result[1];
 				}
-			}//end foreach new doc
-			
-		}// end iterations
+			}
+		}
 		
 		System.out.println("Gibbs sampling for inference completed!");
 		
@@ -101,21 +89,12 @@ public class Inferencer {
 		return this.newModel;
 	}
 	
-	public Model inference(String [] strs){
-		//System.out.println("read dataset");
+	public Model inference(String[] strs){
 		Corpus corpus = Corpus.loadCorpus(strs, globalVoc);
-		
 		return inference(corpus);
 	}
 	
-	/**
-	 * inference new model ~ getting dataset from file specified in option
-	 * @return
-	 * @throws IOException 
-	 */
 	public Model inference() throws IOException{	
-		//System.out.println("inference");
-		
 		newModel = new Model();
 		if (!newModel.initNewModel(option, trnModel)) {
 			return null;
@@ -124,60 +103,19 @@ public class Inferencer {
 		System.out.println("Sampling " + niters + " iteration for inference!");
 		
 		for (newModel.liter = 1; newModel.liter <= niters; newModel.liter++){
-			//System.out.println("Iteration " + newModel.liter + " ...");
-			
-			// for all newz_i
 			for (int m = 0; m < newModel.M; ++m){
 				for (int n = 0, N = newModel.data.docs.get(m).length; n < N; n++){
-					// (newz_i = newz[m][n]
-					// sample from p(z_i|z_-1,w)
-					int topic = infSample(m, n);
-					newModel.z[m][n] = topic;
+					int[] result = infSample(m, n);
+					newModel.z[m][n] = result[0];
+					newModel.s[m][n] = result[1];
 				}
-			}//end foreach new doc
-			
-		}// end iterations
+			}
+		}
 		
 		System.out.println("Gibbs sampling for inference completed!");		
 		System.out.println("Saving the inference outputs!");
 		
 		computeNewTheta();
-		
-		int count = 0;
-		for (int i = 0; i < newModel.M; i++) {
-			List<Pair<Integer, Double>> list = new ArrayList<Pair<Integer, Double>>();
-			for (int j = 0; j < newModel.K; j++) {
-				Pair<Integer, Double> pair = new Pair<Integer, Double>(j, newModel.theta[i][j]);
-				list.add(pair);
-			}
-			Collections.sort(list);
-			System.out.print("docid:" + (i+1) + "\t");
-			/*Domain domain = DomainService.getByDomainId(newModel.data.docs.get(i).domain);
-			List<Integer> domains = domain.getTopics();
-			System.out.print(domain.getDomain() + "\t");
-			for (Integer integer : domains) {
-				System.out.print(integer + "\t");
-			}
-//			for (int j = 0; j < 3; j++) {
-			if (domains.contains(list.get(0).first) 
-					|| domains.contains(list.get(1).first) 
-					|| domains.contains(list.get(2).first)
-						) {
-				count++;
-				System.out.print("T");
-			} else {
-				System.out.print("F");
-			}
-			System.out.print("\t" + list.get(0).first);
-			System.out.print("\t" + list.get(1).first);
-			System.out.print("\t" + list.get(2).first);
-//			}
-//			for (Integer integer : domains) {
-//				System.out.print("\t" + integer);
-//			}*/
-			System.out.println();
-		}
-		System.out.println("correct:" + count + ",accuracy:" + (double)count/newModel.M);
 		computeNewPhi();
 		newModel.liter--;
 		newModel.saveModel(newModel.dfile + "." + newModel.modelName);		
@@ -186,82 +124,111 @@ public class Inferencer {
 	}
 	
 	/**
-	 * do sampling for inference
-	 * m: document number
-	 * n: word number?
+	 * Sample (topic, sentiment) pair for inference.
+	 * Combines training model counts with new model counts.
+	 * @return int[]{topic, sentiment}
 	 */
-	protected int infSample(int m, int n){
-		// remove z_i from the count variables
+	protected int[] infSample(int m, int n){
 		int topic = newModel.z[m][n];
+		int sentiment = newModel.s[m][n];
 		int _w = newModel.data.docs.get(m).words[n];
-		int w = newModel.data.lid2gid.get(_w);
-		newModel.nw[_w][topic] -= 1;
-		newModel.nd[m][topic] -= 1;
-		newModel.nwsum[topic] -= 1;
-		newModel.ndsum[m] -= 1;
+		Integer wObj = newModel.data.lid2gid.get(_w);
+		int w = (wObj != null) ? wObj : _w;
+
+		newModel.nw[_w][topic][sentiment]--;
+		newModel.nd[m][topic][sentiment]--;
+		newModel.nwsum[topic][sentiment]--;
+		newModel.ndsum[m][sentiment]--;
+		newModel.nsum[m]--;
 		
-		// do multinomial sampling via cummulative method		
-		for (int k = 0; k < newModel.K; k++){			
-			newModel.p[k] = (trnModel.nw[w][k] + newModel.nw[_w][k] + newModel.beta) /
-					(trnModel.nwsum[k] +  newModel.nwsum[k] + trnModel.V * newModel.beta) *
-					(newModel.nd[m][k] + newModel.alpha) /
-					(newModel.ndsum[m] + trnModel.K * newModel.alpha);
+		double Kalpha = newModel.K * newModel.alpha;
+		double Vbeta = trnModel.V * newModel.beta;
+		double Sgama = newModel.S * newModel.gama;
+
+		double psum = 0;
+		for (int k = 0; k < newModel.K; k++){
+			for (int l = 0; l < newModel.S; l++) {
+				double nwTrn = (w < trnModel.V) ? trnModel.nw[w][k][l] : 0;
+				double nwsumTrn = trnModel.nwsum[k][l];
+				newModel.p[k][l] = 
+					(nwTrn + newModel.nw[_w][k][l] + newModel.beta) /
+					(nwsumTrn + newModel.nwsum[k][l] + Vbeta) *
+					(newModel.nd[m][k][l] + newModel.alpha) /
+					(newModel.ndsum[m][l] + Kalpha) *
+					(newModel.ndsum[m][l] + newModel.gama) /
+					(newModel.nsum[m] + Sgama);
+				psum += newModel.p[k][l];
+			}
 		}
 		
-		// cummulate multinomial parameters
-		for (int k = 1; k < newModel.K; k++){
-			newModel.p[k] += newModel.p[k - 1];
+		double u = Math.random() * psum;
+		double cumsum = 0;
+		topic = 0;
+		sentiment = 0;
+		boolean found = false;
+		for (int k = 0; k < newModel.K && !found; k++){
+			for (int l = 0; l < newModel.S && !found; l++) {
+				cumsum += newModel.p[k][l];
+				if (cumsum > u) {
+					topic = k;
+					sentiment = l;
+					found = true;
+				}
+			}
 		}
 		
-		// scaled sample because of unnormalized p[]
-		double u = Math.random() * newModel.p[newModel.K - 1];
+		newModel.nw[_w][topic][sentiment]++;
+		newModel.nd[m][topic][sentiment]++;
+		newModel.nwsum[topic][sentiment]++;
+		newModel.ndsum[m][sentiment]++;
+		newModel.nsum[m]++;
 		
-		for (topic = 0; topic < newModel.K; topic++){
-			if (newModel.p[topic] > u)
-				break;
-		}
-		
-		// add newly estimated z_i to count variables
-		newModel.nw[_w][topic] += 1;
-		newModel.nd[m][topic] += 1;
-		newModel.nwsum[topic] += 1;
-		newModel.ndsum[m] += 1;
-		
-		return topic;
+		return new int[]{topic, sentiment};
 	}
 	
 	protected void computeNewTheta(){
 		for (int m = 0; m < newModel.M; m++){
-			for (int k = 0; k < newModel.K; k++){
-				newModel.theta[m][k] = (newModel.nd[m][k] + newModel.alpha) / (newModel.ndsum[m] + newModel.K * newModel.alpha);
-			}//end foreach topic
-		}//end foreach new document
+			for (int l = 0; l < newModel.S; l++) {
+				for (int k = 0; k < newModel.K; k++){
+					newModel.theta[m][l][k] = (newModel.nd[m][k][l] + newModel.alpha) /
+						(newModel.ndsum[m][l] + newModel.K * newModel.alpha);
+				}
+			}
+		}
 	}
 	
 	protected void computeNewPhi(){
-		for (int k = 0; k < newModel.K; k++){
-			for (int _w = 0; _w < newModel.V; _w++){
-				Integer id = newModel.data.lid2gid.get(_w);
-				
-				if (id != null){
-					newModel.phi[k][_w] = (trnModel.nw[id][k] + newModel.nw[_w][k] + newModel.beta) / (newModel.nwsum[k] + newModel.nwsum[k] + trnModel.V * newModel.beta);
+		for (int l = 0; l < newModel.S; l++) {
+			for (int k = 0; k < newModel.K; k++){
+				for (int _w = 0; _w < newModel.V; _w++){
+					Integer id = newModel.data.lid2gid.get(_w);
+					if (id != null && id < trnModel.V){
+						newModel.phi[l][k][_w] = (trnModel.nw[id][k][l] + newModel.nw[_w][k][l] + newModel.beta) /
+							(trnModel.nwsum[k][l] + newModel.nwsum[k][l] + trnModel.V * newModel.beta);
+					}
 				}
-			}//end foreach word
-		}// end foreach topic
+			}
+		}
 	}
 	
 	protected void computeTrnTheta(){
 		for (int m = 0; m < trnModel.M; m++){
-			for (int k = 0; k < trnModel.K; k++){
-				trnModel.theta[m][k] = (trnModel.nd[m][k] + trnModel.alpha) / (trnModel.ndsum[m] + trnModel.K * trnModel.alpha);
+			for (int l = 0; l < trnModel.S; l++) {
+				for (int k = 0; k < trnModel.K; k++){
+					trnModel.theta[m][l][k] = (trnModel.nd[m][k][l] + trnModel.alpha) /
+						(trnModel.ndsum[m][l] + trnModel.K * trnModel.alpha);
+				}
 			}
 		}
 	}
 	
 	protected void computeTrnPhi(){
-		for (int k = 0; k < trnModel.K; k++){
-			for (int w = 0; w < trnModel.V; w++){
-				trnModel.phi[k][w] = (trnModel.nw[w][k] + trnModel.beta) / (trnModel.nwsum[k] + trnModel.V * trnModel.beta);
+		for (int l = 0; l < trnModel.S; l++) {
+			for (int k = 0; k < trnModel.K; k++){
+				for (int w = 0; w < trnModel.V; w++){
+					trnModel.phi[l][k][w] = (trnModel.nw[w][k][l] + trnModel.beta) /
+						(trnModel.nwsum[k][l] + trnModel.V * trnModel.beta);
+				}
 			}
 		}
 	}

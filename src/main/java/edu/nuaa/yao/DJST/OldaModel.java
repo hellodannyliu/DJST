@@ -7,7 +7,7 @@ public class OldaModel extends Model{
 	
 	public int delta;
 	public double[] omega;
-	public int S;
+
 	public boolean init(OldaArgs option) {
 		if (option == null) {
     		return false;
@@ -43,12 +43,11 @@ public class OldaModel extends Model{
 	}
 	
 	/**
-	 * Init parameters for estimation
+	 * Init parameters for estimation of the first time window
 	 */
     public boolean initFirstOldaModel() {
     	
     	p = new double[K][S];
-    	//System.out.println(dir + File.separator + dfile + File.separator + "1.txt");
 		data = Corpus.loadCorpus(dir + File.separator + dfile + File.separator + "1.txt");
      	
 		modelName += "-1";
@@ -65,38 +64,34 @@ public class OldaModel extends Model{
     	nd = new int[M][K][S];
     	nwsum = new int[K][S];
     	ndsum = new int[M][S];
-    	nsum=new int[M];
+    	nsum = new int[M];
     	z = new int[M][];
-    	s=new int[M][];
-    	theta=new double[M][S][K]; //theta: document - topic distributions, size M x K
-	 	phi=new double [S][K][V]; // phi: topic-word distributions, size K x V
+    	s = new int[M][];
+    	theta = new double[M][S][K];
+	 	phi = new double[S][K][V];
+
     	for (int m = 0; m < M; m++) {
 			int N = data.docs.get(m).length;
 			z[m] = new int[N];
-			s[m]=new int[N];
-			//initialize z
+			s[m] = new int[N];
 			for(int n = 0; n < N; n++) {
 				int topic = (int)(Math.random() * K);
-				int sentiment =(int)(Math.random()*S);
-				s[m][n]=sentiment;
+				int sentiment = (int)(Math.random() * S);
+				s[m][n] = sentiment;
 				z[m][n] = topic;
-				nw[data.docs.get(m).words[n]][topic][S]++;
-				nd[m][topic][S]++;
-				nwsum[topic][S]++;
-				ndsum[m][S] ++;
+				nw[data.docs.get(m).words[n]][topic][sentiment]++;
+				nd[m][topic][sentiment]++;
+				nwsum[topic][sentiment]++;
+				ndsum[m][sentiment]++;
 				nsum[m]++;
 			}
-			
 		}
-    	
-    	theta = new double[M][S][K];
-    	phi = new double[S][K][V];
     	
     	return true;
     }
     
 	/**
-	 * Init parameters for estimation
+	 * Init parameters for estimation of subsequent time windows
 	 */
    public boolean initNewOldaModel(OldaArgs option, Vocabulary globalVoc, int stream) {
     	
@@ -104,14 +99,12 @@ public class OldaModel extends Model{
     	modelName = option.modelName + "-" + stream;
     	
     	p = new double[K][S];
-    	//System.out.println(dir + File.separator + dfile + File.separator + stream + ".txt");
 		data = Corpus.loadCorpus(dir + File.separator + dfile + File.separator + stream + ".txt", globalVoc);
      	
      	if (data == null) {
     		System.out.println("Fail to load training data into model!\n");
     		return false;
     	}
-    	
 
     	M = data.M;
     	V = data.V;
@@ -120,32 +113,28 @@ public class OldaModel extends Model{
     	nd = new int[M][K][S];
     	nwsum = new int[K][S];
     	ndsum = new int[M][S];
-    	nsum=new int[M];
+    	nsum = new int[M];
     	z = new int[M][];
-    	s=new int[M][];
-    	theta=new double[M][S][K]; //theta: document - topic distributions, size M x K
-	 	phi=new double [S][K][V]; // phi: topic-word distributions, size K x V
+    	s = new int[M][];
+    	theta = new double[M][S][K];
+	 	phi = new double[S][K][V];
+
     	for (int m = 0; m < M; m++) {
 			int N = data.docs.get(m).length;
 			z[m] = new int[N];
-			s[m]=new int[N];
-			//initialize z
+			s[m] = new int[N];
 			for(int n = 0; n < N; n++) {
 				int topic = (int)(Math.random() * K);
-				int sentiment =(int)(Math.random()*S);
-				s[m][n]=sentiment;
+				int sentiment = (int)(Math.random() * S);
+				s[m][n] = sentiment;
 				z[m][n] = topic;
-				nw[data.docs.get(m).words[n]][topic][S]++;
-				nd[m][topic][S]++;
-				nwsum[topic][S]++;
-				ndsum[m][S] ++;
+				nw[data.docs.get(m).words[n]][topic][sentiment]++;
+				nd[m][topic][sentiment]++;
+				nwsum[topic][sentiment]++;
+				ndsum[m][sentiment]++;
 				nsum[m]++;
 			}
-			
 		}
-    	
-    	theta = new double[M][S][K];
-    	phi = new double[S][K][V];
     	
     	return true;
     }

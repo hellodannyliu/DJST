@@ -6,6 +6,11 @@ import java.util.HashMap;
 import java.util.List;
 import java.util.Map;
 
+/**
+ * Similarity analyser for comparing topic distributions across models.
+ * Updated for 3D phi[S][K][V] arrays used by the dJST model.
+ * Compares topics within sentiment label 0 by default.
+ */
 public class SimlarityAnalyser {
 
 	public Model big;
@@ -13,6 +18,7 @@ public class SimlarityAnalyser {
 	public double[] smallAvg;
 	public double[] bigAvg;
 	public Map<Integer, Integer> small2big;
+	public int sentimentLabel = 0;
 	
 	public void init(String bigPath, String smallPath) {
 		big = new Model();
@@ -34,13 +40,12 @@ public class SimlarityAnalyser {
 				small2big.put(i, bigid);
 				n++;
 				for (int j = 0; j < small.K; j++) {
-					smallAvg[j] += small.phi[j][i];
+					smallAvg[j] += small.phi[sentimentLabel][j][i];
 				}
 				for (int j = 0; j < big.K; j++) {
-					bigAvg[j] += big.phi[j][bigid];
+					bigAvg[j] += big.phi[sentimentLabel][j][bigid];
 				}
 			}
-			
 		}
 		
 		for (int i = 0; i < small.K; i++) {
@@ -52,23 +57,23 @@ public class SimlarityAnalyser {
 	}
 	
 	public double computeSimilarity(int tsmall, int tbig) {
-		
 		double num = 0;
 		double dem1 = 0;
 		double dem2 = 0;
 		for (Map.Entry<Integer, Integer> entry : small2big.entrySet()) {
 			int sid = entry.getKey();
 			int bid = entry.getValue();
-			num += (small.phi[tsmall][sid] - smallAvg[tsmall]) * 
-					(big.phi[tbig][bid] - bigAvg[tbig]);
-			dem1 += (small.phi[tsmall][sid] - smallAvg[tsmall]) * (small.phi[tsmall][sid] - smallAvg[tsmall]);
-			dem2 += (big.phi[tbig][bid] - bigAvg[tbig]) * (big.phi[tbig][bid] - bigAvg[tbig]);
+			double sval = small.phi[sentimentLabel][tsmall][sid] - smallAvg[tsmall];
+			double bval = big.phi[sentimentLabel][tbig][bid] - bigAvg[tbig];
+			num += sval * bval;
+			dem1 += sval * sval;
+			dem2 += bval * bval;
 		}
 		return num / (Math.sqrt(dem1) * Math.sqrt(dem2));
 	}
 	
 	public double[] computeSimilarity(int tsmall) {
-		double[] result = new double[small.K];
+		double[] result = new double[big.K];
 		List<Pair<Integer, Double>> list = new ArrayList<Pair<Integer, Double>>();
 		for (int i = 0; i < big.K; i++) {
 			result[i] = computeSimilarity(tsmall, i);		
@@ -76,7 +81,7 @@ public class SimlarityAnalyser {
 			list.add(p);
 		}
 		Collections.sort(list);
-		for (int j = 0; j < 3; j++) {
+		for (int j = 0; j < 3 && j < list.size(); j++) {
 			System.out.print(list.get(j).first + ":" + list.get(j).second + " ");
 		}
 		System.out.println();
@@ -94,13 +99,14 @@ public class SimlarityAnalyser {
 			}
 			Collections.sort(list);
 			System.out.print(i + ": ");
-			for (int j = 0; j < 3; j++) {
+			for (int j = 0; j < 3 && j < list.size(); j++) {
 				System.out.print(list.get(j).first + ":" + list.get(j).second + " ");
 			}
 			System.out.println();
 		}
 		return result;
 	}
+
 	public static void main(String[] args) {
 		SimlarityAnalyser simlarityAnalyser = new SimlarityAnalyser();
 		simlarityAnalyser.init("./models/0527", "./models/0603/1");
